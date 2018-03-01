@@ -13,10 +13,10 @@
 #include <omp.h>
 
 const int n = 32;
-const int N = 32;
+//int N = 32;
 
 
-void SumCPU(int *A, int *B) {
+void SumCPU(int *A, int *B, int N) {
 
 	unsigned __int64 begin, end;
 
@@ -50,7 +50,7 @@ void SumCPU(int *A, int *B) {
 
 }
 
-__global__ void SumGPU(int *a, int *b) {
+__global__ void SumGPU(int *a, int *b, int N) {
 	int blockX = blockIdx.x;
 	int blockY = blockIdx.y;
 	int tx = threadIdx.x;
@@ -71,7 +71,7 @@ __global__ void SumGPU(int *a, int *b) {
 
 
 
-__global__ void SumGPU_2(int *a, int *b) {
+__global__ void SumGPU_2(int *a, int *b, int N) {
 	int blockX = blockIdx.x;
 	int blockY = blockIdx.y;
 	int tx = threadIdx.x;
@@ -96,6 +96,11 @@ using namespace std;
 
 void main(int argc, char* argv[])
 {
+	int count;
+	printf("count = ");
+	scanf("%d",&count);
+	int N = count % n == 0 ? count / n : count / n + 1;
+
 	double time_s, time_f;
 
 	int *A = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
@@ -112,7 +117,7 @@ void main(int argc, char* argv[])
 
 	memcpy(B, A, n *n *N*N * sizeof(int));
 
-	SumCPU(A, B);
+	SumCPU(A, B, N);
 
 	//for (int i = 0; i < n*N; i++)
 	//{
@@ -191,7 +196,7 @@ void main(int argc, char* argv[])
 	//begin = __rdtsc();
 	time_s = omp_get_wtime();
 	cudaEventSynchronize(start);
-	SumGPU << <blocks, threads >> >(dev_A, dev_B);
+	SumGPU << <blocks, threads >> >(dev_A, dev_B, N);
 	error = cudaGetLastError();
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
@@ -215,7 +220,7 @@ void main(int argc, char* argv[])
 
 	time_s = omp_get_wtime();
 	cudaEventSynchronize(start);
-	SumGPU_2 << <blocks, threads >> >(dev_A, dev_B2);
+	SumGPU_2 << <blocks, threads >> >(dev_A, dev_B2, N);
 	error = cudaGetLastError();
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
