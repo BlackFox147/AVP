@@ -92,15 +92,41 @@ __global__ void SumGPU_2(int *a, int *b, int N) {
 
 
 
+__global__ void SumGPU_3(int *a, int *b, int N) {
+
+	__shared__ int  smem[n][n];
+
+	int blockX = blockIdx.x;
+	int blockY = blockIdx.y;
+	int tx = threadIdx.x;
+	int ty = threadIdx.y;
+	int dx = blockDim.x;
+	int dy = blockDim.y;
+	int j = blockX * dx + tx;
+	int i = blockY * dy + ty;
+
+	smem[ty][tx] = a[i*n *N + j];
+	__syncthreads();
+
+	for (int ki = 0; ki <= ty; ki++) {
+		for (int kj = 0; kj <= tx; kj++) {
+			b[i*n *N + j] += smem[ki][kj];
+		}
+	}
+	b[i*n*N + j] -= smem[ty][tx];
+	__syncthreads();
+}
+
+
 using namespace std;
 
 void main(int argc, char* argv[])
 {
 	int count;
-	printf("count = ");
-	scanf("%d",&count);
-	int N = count % n == 0 ? count / n : count / n + 1;
-
+	//printf("count = ");
+	//scanf("%d",&count);
+	//int N = count % n == 0 ? count / n : count / n + 1;
+	int N = 32;
 	double time_s, time_f;
 
 	int *A = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
@@ -143,15 +169,17 @@ void main(int argc, char* argv[])
 	printf("\n");
 	printf("\n");*/
 
-	int *dev_A, *dev_X, *dev_B, *dev_B2;
+	int *dev_A, *dev_X, *dev_B, *dev_B2, *dev_B3;
 
 	int *a = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
 	int *b = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
 	int *b_2 = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
+	int *b_3 = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
 
 	memcpy(a, A, n *n *N*N * sizeof(int));
 	memcpy(b, A, n *n *N*N * sizeof(int));
 	memcpy(b_2, A, n *n *N*N * sizeof(int));
+	memcpy(b_3, A, n *n *N*N * sizeof(int));
 
 	cudaError_t error = cudaMalloc((void**)&dev_A, n *n *N*N * sizeof(int));
 	if (error != cudaSuccess) {
@@ -168,6 +196,11 @@ void main(int argc, char* argv[])
 		printf("%s\n", cudaGetErrorString(error));
 	}
 
+	error = cudaMalloc((void**)&dev_B3, n *n *N*N * sizeof(int));
+	if (error != cudaSuccess) {
+		printf("%s\n", cudaGetErrorString(error));
+	}
+
 	error = cudaMemcpy(dev_A, a, n *n *N*N * sizeof(int), cudaMemcpyHostToDevice);
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
@@ -179,6 +212,11 @@ void main(int argc, char* argv[])
 	}
 
 	error = cudaMemcpy(dev_B2, b_2, n *n *N*N * sizeof(int), cudaMemcpyHostToDevice);
+	if (error != cudaSuccess) {
+		printf("%s\n", cudaGetErrorString(error));
+	}
+
+	error = cudaMemcpy(dev_B3, b_3, n *n *N*N * sizeof(int), cudaMemcpyHostToDevice);
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
 	}
@@ -235,13 +273,34 @@ void main(int argc, char* argv[])
 	printf("GPU_2: %f \n",
 		(time_f - time_s));
 
-	error = cudaMemcpy(b_2, dev_B, n*n *N*N * sizeof(int), cudaMemcpyDeviceToHost);
+	error = cudaMemcpy(b_2, dev_B2, n*n *N*N * sizeof(int), cudaMemcpyDeviceToHost);
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
 	}
 
 	timer = 0;
 
+	time_s = omp_get_wtime();
+	cudaEventSynchronize(start);
+	SumGPU_3 << <blocks, threads >> >(dev_A, dev_B3, N);
+	error = cudaGetLastError();
+	if (error != cudaSuccess) {
+		printf("%s\n", cudaGetErrorString(error));
+	}
+
+	cudaEventRecord(stop);
+	cudaEventSynchronize(stop);
+	//end = __rdtsc() - begin;
+
+	//printf("runTimeGPU1 =  %llu \n", end - begin);
+	time_f = omp_get_wtime();
+	printf("GPU_3 with __shared__: %f \n",
+		(time_f - time_s));
+
+	error = cudaMemcpy(b_3, dev_B3, n*n *N*N * sizeof(int), cudaMemcpyDeviceToHost);
+	if (error != cudaSuccess) {
+		printf("%s\n", cudaGetErrorString(error));
+	}
 
 	//cudaEventElapsedTime(&timer, start, stop);
 	//printf("GPU = %f ms\n", timer);
@@ -266,16 +325,28 @@ void main(int argc, char* argv[])
 		for (int j = 0; j < n*N; j++)
 		{
 			if (B[i*n*N + j] != b[i*n*N + j]) {
+				printf("B %d - b %d\n", B[i*n*N + j], b[i*n*N + j]);
 				printf("ERROR!!! b1\n");
 				ch = 1;
 			}
 
 			if (B[i*n*N + j] != b_2[i*n*N + j]) {
+				printf("B %d - b2 %d\n", B[i*n*N + j], b_2[i*n*N + j]);
 				printf("ERROR!!! b2\n");
 				ch = 1;
 			}
 
+			if (B[i*n*N + j] != b_3[i*n*N + j]) {
+				printf("B %d - b3 %d\n", B[i*n*N + j], b_3[i*n*N + j]);
+				printf("ERROR!!! b3\n");
+				ch = 1;
+			}
+
 			if (ch == 1) {
+				cudaFree(dev_A);
+				cudaFree(dev_B);
+				cudaFree(dev_B2);
+				cudaFree(dev_B3);
 				return;
 			}
 		}
@@ -284,5 +355,5 @@ void main(int argc, char* argv[])
 	cudaFree(dev_A);
 	cudaFree(dev_B);
 	cudaFree(dev_B2);
-
+	cudaFree(dev_B3);
 }
