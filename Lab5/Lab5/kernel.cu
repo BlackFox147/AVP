@@ -94,7 +94,8 @@ __global__ void SumGPU_2(int *a, int *b, int N) {
 
 __global__ void SumGPU_3(int *a, int *b, int N) {
 
-	__shared__ int  smem[n][n];
+	//__shared__ int  smem[n][n];
+	__shared__ int  smem[n * (n + 0)];
 
 	int blockX = blockIdx.x;
 	int blockY = blockIdx.y;
@@ -105,15 +106,15 @@ __global__ void SumGPU_3(int *a, int *b, int N) {
 	int j = blockX * dx + tx;
 	int i = blockY * dy + ty;
 
-	smem[ty][tx] = a[i*n *N + j];
+	smem[ty* (n + 0) + tx] = a[i*n *N + j];
 	__syncthreads();
 
 	for (int ki = 0; ki <= ty; ki++) {
 		for (int kj = 0; kj <= tx; kj++) {
-			b[i*n *N + j] += smem[ki][kj];
+			b[i*n *N + j] += smem[ki* (n + 0) + kj];
 		}
 	}
-	b[i*n*N + j] -= smem[ty][tx];
+	b[i*n*N + j] -= smem[ty * (n + 0) + tx];
 	__syncthreads();
 }
 
@@ -123,10 +124,11 @@ using namespace std;
 void main(int argc, char* argv[])
 {
 	int count;
-	//printf("count = ");
-	//scanf("%d",&count);
-	//int N = count % n == 0 ? count / n : count / n + 1;
-	int N = 32;
+	printf("count = ");
+	scanf("%d",&count);
+	printf("\n");
+	int N = count % n == 0 ? count / n : count / n + 1;
+	//int N = 32;
 	double time_s, time_f;
 
 	int *A = (int*)_aligned_malloc(n *n *N*N * sizeof(int), 32);
@@ -144,18 +146,6 @@ void main(int argc, char* argv[])
 	memcpy(B, A, n *n *N*N * sizeof(int));
 
 	SumCPU(A, B, N);
-
-	//for (int i = 0; i < n*N; i++)
-	//{
-	//	for (int j = 0; j < n*N; j++)
-	//	{
-	//		printf("%u\t", A[i*n*N + j]);
-	//	}
-	//	printf("\n");
-	//}
-	//printf("\n");
-	//printf("\n");
-
 
 	/*for (int i = 0; i < n*N; i++)
 	{
