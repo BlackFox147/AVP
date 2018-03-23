@@ -20,112 +20,80 @@ const int nx = 32;
 const int ny = 16;
 const int N = 4;
 
-
 __global__ void SumGPU(unsigned *a, char *b, unsigned char *r,
 	int cols, int rows, int pitch, int pitch1) {
 
-	__shared__ unsigned smem[ny + 1][nx + 1];
-	unsigned tempBlock[12] = { 0,0,0,0,0,0,0,0,0,0,0,0 };
+	__shared__ unsigned smem[ny + 2][nx + 1];
 
 	int xid = blockIdx.x * blockDim.x + threadIdx.x;
+
 	int yid = blockIdx.y * blockDim.y + threadIdx.y;
 
-	if (blockIdx.x == (gridDim.x - 1) || blockIdx.y == (gridDim.y - 1))
-		return;
+	if ((threadIdx.y + 1) == ny)
+	{
+		smem[threadIdx.y][threadIdx.x] = a[yid * pitch + xid];
+		smem[threadIdx.y + 1][threadIdx.x] = a[(yid + 1) * pitch + xid];
+		smem[threadIdx.y + 2][threadIdx.x] = a[(yid + 2) * pitch + xid];
 
-	if (xid < cols && yid < rows); {
-
-		if ((threadIdx.y + 1) == ny && (yid + 1) < rows)
+		if ((threadIdx.x + 1) == nx)
 		{
-			smem[threadIdx.y][threadIdx.x] = a[yid * pitch + xid];
-			smem[threadIdx.y + 1][threadIdx.x] = a[(yid + 1) * pitch + xid];
+			smem[threadIdx.y][(threadIdx.x + 1)] = a[yid * pitch + xid + 1];
+			smem[threadIdx.y + 1][threadIdx.x + 1] = a[(yid + 1) * pitch + xid + 1];
+			smem[threadIdx.y + 2][threadIdx.x + 1] = a[(yid + 2) * pitch + xid + 1];
 
-			if ((threadIdx.x + 1) == nx)
-			{
-				smem[threadIdx.y][(threadIdx.x + 1)] = a[yid * pitch + xid + 1];
-				smem[threadIdx.y + 1][threadIdx.x + 1] = a[(yid + 1) * pitch + xid + 1];
-				//printf("CPU: %u__ GPU: %u", a[yid * pitch + xid * N + e], smem[threadIdx.y][threadIdx.x * N + e]);
-			}
 		}
-		else
+	}
+	else
+	{
+		smem[threadIdx.y][threadIdx.x] = a[yid * pitch + xid];
+
+		if ((threadIdx.x + 1) == nx)
 		{
-			smem[threadIdx.y][threadIdx.x] = a[yid * pitch + xid];
+			smem[threadIdx.y][(threadIdx.x + 1)] = a[yid * pitch + xid + 1];
 
-			if ((threadIdx.x + 1) == nx)
-			{
-				smem[threadIdx.y][(threadIdx.x + 1)] = a[yid * pitch + xid + 1];
-				//printf("CPU: %u__ GPU: %u", a[yid * pitch + xid * N + e], smem[threadIdx.y][threadIdx.x * N + e]);
-			}
 		}
-		__syncthreads();
-
-
-		unsigned char *ptr = (unsigned char *)smem;
-		if (yid < rows - 1 && xid < cols - 1)
-		{
-			int esx = 0, esy = 0;
-			if (threadIdx.x == 0) {
-				esx = 1;
-			}
-			if (threadIdx.y == 0) {
-				esy = 1;
-			}
-			for (; esx < 4 && threadIdx.x * N + esx < cols; esx++)
-			{
-				int basex = threadIdx.x * N - 1 + esx;
-				int basey = threadIdx.y - 1 + esy;
-				int sum = 0;
-				for (int yt = basey; yt < basey + 3; yt++) {
-					for (int xt = basex; xt < basex + 3; xt++) {
-						sum += ptr[yt*(nx)*N + 1 + xt] * b[(yt - basey) * 3 + (xt - basex)];
-					}
-				}
-				if (sum > 255) {
-					sum = 255;
-				}
-				if (sum < 0) {
-					sum = 0;
-				}
-				r[yid * pitch1 + xid * N + esx] = (unsigned char)sum;
-			}
-		}
-
-		//unsigned char *ptr = (unsigned char *)smem;
-		//if (yid < rows - 1 && xid*N < cols - 1) 
-		//{
-		//	int esx = 0, esy = 0;
-		//	if (threadIdx.x == 0) {
-		//		esx = 1;				
-		//	}
-		//	if (threadIdx.y == 0) {
-		//		esy = 1;
-		//	}
-		//	for (; esx < 4 && threadIdx.x * N + esx < cols; esx++)
-		//	{
-		//		int basex = threadIdx.x * N - 1 + esx;
-		//		int basey = threadIdx.y - 1 + esy;
-		//		int sum = 0;
-		//		for (int yt = basey; yt < basey + 3; yt++) {
-		//			for (int xt = basex; xt < basex + 3; xt++) {
-		//				sum += ptr[yt*(nx)*N + 1 + xt] * b[(yt - basey) * 3 + (xt - basex)];
-		//			}
-		//		}
-		//		if (sum > 255) {
-		//			sum = 255;
-		//		}
-		//		if (sum < 0) {
-		//			sum = 0;
-		//		}
-		//		r[yid * pitch1 + xid*N + esx] = (unsigned char)sum;
-		//	}			
-		//}		
 	}
 
+	__syncthreads();
+
+	unsigned char *psmem = (unsigned char *)smem;
+
+	for (int i = 0; i < 4 && xid*N + 1 < cols - 1
+		&& yid + 1 < rows - 1; i++)
+	{
+		int basex = threadIdx.x * N + i;
+		int basey = threadIdx.y;
+
+		//unsigned char temp = Filter(basex, basey, psmem, b);
+
+		int sum = 0;
+
+		sum += psmem[basey*((nx + 1)*N) + basex] * b[0];
+		sum += psmem[basey*((nx + 1)*N) + basex + 1] * b[1];
+		sum += psmem[basey*((nx + 1)*N) + basex + 2] * b[2];
+		sum += psmem[(basey + 1)*((nx + 1)*N) + basex] * b[3];
+		sum += psmem[(basey + 1)*((nx + 1)*N) + basex + 1] * b[4];
+		sum += psmem[(basey + 1)*((nx + 1)*N) + basex + 2] * b[5];
+		sum += psmem[(basey + 2)*((nx + 1)*N) + basex] * b[6];
+		sum += psmem[(basey + 2)*((nx + 1)*N) + basex + 1] * b[7];
+		sum += psmem[(basey + 2)*((nx + 1)*N) + basex + 2] * b[8];
+
+		if (sum > 255) {
+			sum = 255;
+		}
+		if (sum < 0) {
+			sum = 0;
+		}
+
+		r[(yid + 1)* pitch1 + (xid)* N + 1 + i] = (unsigned char)sum;
+	}
 }
+
+
 
 int main()
 {
-	Mat img = imread("D:\\test.pgm", IMREAD_UNCHANGED);
+	Mat img = imread("D:\\test.pgm", IMREAD_UNCHANGED);	
 	normalize(img, img, 0, 255, NORM_MINMAX);
 	img.convertTo(img, CV_8U);
 
@@ -163,7 +131,7 @@ int main()
 	printf("CPU: %f \n",
 		(time_f - time_s));
 
-	unsigned char *dev_R;
+	unsigned char *dev_R;		//
 	unsigned *dev_A;
 	char *dev_B;
 	Mat imgResGPU = img.clone();
@@ -176,7 +144,7 @@ int main()
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
 	}
-	error = cudaMallocPitch((void**)&dev_R, &pitch1, img.cols * sizeof(unsigned char), img.rows);
+	error = cudaMallocPitch((void**)&dev_R, &pitch1, img.cols * sizeof(unsigned char), img.rows);		//
 	if (error != cudaSuccess) {
 		printf("%s\n", cudaGetErrorString(error));
 	}
@@ -247,7 +215,7 @@ int main()
 	imwrite("D:\\outputImg.pgm", img);
 	//imshow("img", img);
 	//imshow("imgRes", imgRes);
-	//imshow("imgResGPU", imgResGPU);	
+	//imshow("imgResGPU", imgResGPU);
 	waitKey(0);
 	return 0;
 }
